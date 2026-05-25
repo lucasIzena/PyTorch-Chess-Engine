@@ -1,0 +1,1479 @@
+<!doctype html>
+<html lang="en">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chess - Game</title>
+  </head>
+  <body>
+    <div class="main-container">
+      <div class="board-container">
+        <div class="board-stack">
+          <div class="captured-bar" id="topCapturedBar"></div>
+          <div class="chess-board" id="board"></div>
+          <div class="captured-bar" id="bottomCapturedBar"></div>
+        </div>
+      </div>
+      <aside class="sidebar">
+        <div class="player-card" id="topPlayerCard">
+          <div class="player-meta">
+            <div class="player-label" id="topPlayerLabel">Opponent</div>
+            <div class="player-name" id="topPlayerName">Black</div>
+          </div>
+          <div class="timer" id="topPlayerTimer">-- : --</div>
+        </div>
+        <div class="player-card" id="bottomPlayerCard">
+          <div class="player-meta">
+            <div class="player-label" id="bottomPlayerLabel">You</div>
+            <div class="player-name" id="bottomPlayerName">White</div>
+          </div>
+          <div class="timer" id="bottomPlayerTimer">-- : --</div>
+        </div>
+        <div class="info-grid">
+          <div class="info-tile">
+            <div class="info-kicker">Turn</div>
+            <div class="info-value" id="turnValue">White to move</div>
+          </div>
+          <div class="info-tile">
+            <div class="info-kicker">Game Mode</div>
+            <div class="info-value" id="gameModeValue">Engine: Easy</div>
+          </div>
+        </div>
+        <div class="history-panel">
+          <div class="move-history" id="moveHistory"></div>
+        </div>
+        <div class="historyControls">
+          <button id="firstMoveButton">I◄</button>
+          <button id="previousMoveButton">◄</button>
+          <button id="nextMoveButton">►</button>
+          <button id="latestMoveButton">►I</button>
+        </div>
+        <div class="controls">
+          <button id="newGameButton">New Game</button>
+          <button id="flipBoardButton">Flip Board</button>
+        </div>
+      </aside>
+    </div>
+    <div id="promotionOverlay" class="promotion-overlay hidden">
+      <div id="promotionCard" class="promotion-card">
+        <div class="promotion-piece" data-promotion="q"></div>
+        <div class="promotion-piece" data-promotion="r"></div>
+        <div class="promotion-piece" data-promotion="b"></div>
+        <div class="promotion-piece" data-promotion="n"></div>
+      </div>
+    </div>
+    <div id="gameSetupOverlay" class="game-setup-overlay hidden">
+      <div class="game-setup-card">
+        <div class="game-setup-title">New Game</div>
+        <div class="setup-section">
+          <div class="setup-label">Game mode</div>
+          <div class="setup-options two-options">
+            <button class="setup-option selected" data-mode="engine">
+              Play Engine
+            </button>
+            <button class="setup-option" data-mode="local">
+              Over the Board
+            </button>
+          </div>
+        </div>
+        <div class="setup-section" id="difficultySection">
+          <div class="setup-label">Difficulty</div>
+          <div class="setup-options difficulty-options">
+            <button class="setup-option selected" data-difficulty="easy">Easy</button>
+            <button class="setup-option" data-difficulty="medium">Medium</button>
+            <button class="setup-option" data-difficulty="hard">Hard</button>
+          </div>
+        </div>
+        <div class="setup-section">
+          <div class="setup-label">Time</div>
+          <div class="setup-options time-options">
+            <button class="setup-option selected" data-time="none">No timer</button>
+            <button class="setup-option" data-time="60">1 min</button>
+            <button class="setup-option" data-time="300">5 min</button>
+            <button class="setup-option" data-time="600">10 min</button>
+          </div>
+        </div>
+        <div class="setup-section" id="colorSection">
+          <div class="setup-label">Play as</div>
+          <div class="setup-options color-options">
+            <button class="setup-option selected" data-color="white">White</button>
+            <button class="setup-option" data-color="random">Random</button>
+            <button class="setup-option" data-color="black">Black</button>
+          </div>
+        </div>
+        <button id="startGameButton" class="start-game-button">
+          Start Game
+        </button>
+      </div>
+    </div>
+    <div id="gameOverOverlay" class="game-over-overlay hidden">
+      <div class="game-over-card">
+        <div id="gameOverTitle" class="game-over-title">Game over</div>
+        <div id="gameOverReason" class="game-over-reason">by checkmate</div>
+        <div class="game-over-actions">
+          <button id="rematchButton">Rematch</button>
+          <button id="gameOverNewGameButton">New Game</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      const boardElement = document.getElementById("board");
+
+      const pieceImages = {
+        r: "/static/pieces/br.svg",
+        n: "/static/pieces/bn.svg",
+        b: "/static/pieces/bb.svg",
+        q: "/static/pieces/bq.svg",
+        k: "/static/pieces/bk.svg",
+        p: "/static/pieces/bp.svg",
+        R: "/static/pieces/wr.svg",
+        N: "/static/pieces/wn.svg",
+        B: "/static/pieces/wb.svg",
+        Q: "/static/pieces/wq.svg",
+        K: "/static/pieces/wk.svg",
+        P: "/static/pieces/wp.svg",
+      };
+
+      let position = [];
+      let selectedSquare = null;
+      let pendingDragPiece = null;
+      let draggedPiece = null;
+      let draggedFromSquare = null;
+      let dragStartX = 0;
+      let dragStartY = 0;
+      let dragOffsetX = 0;
+      let dragOffsetY = 0;
+      let currentDragTarget = null;
+      let draggingFromSquare = null;
+      let lastMoveFrom = null;
+      let lastMoveTo = null;
+      let boardFlipped = false; 
+      let gameSettings = {
+        mode: "engine",
+        timeControl: "none",
+        difficulty: "easy",
+        playerColor: "white",
+      };
+      let playerColor = "White";
+      let clockInterval = null;
+      let clocks = {
+        White: null,
+        Black: null,
+      };
+      let activeClock = null;
+      let clockStarted = false; 
+      let gameIsRunning = false;
+      let gameEndMarkers = null;
+      let currentPosition = [];
+      let positionHistory = [];
+      let historyIndex = 0;
+      let historyAnimationInProgress = false;
+      const dragThreshold = 1;
+
+      const startingPieceCounts = {
+        P: 8,
+        N: 2,
+        B: 2,
+        R: 2,
+        Q: 1,
+        K: 1,
+        p: 8,
+        n: 2,
+        b: 2,
+        r: 2,
+        q: 1,
+        k: 1,
+      };
+
+      const pieceValues = {
+        P: 1,
+        N: 3,
+        B: 3,
+        R: 5,
+        Q: 9,
+        K: 0,
+        p: 1,
+        n: 3,
+        b: 3,
+        r: 5,
+        q: 9,
+        k: 0,
+      };
+
+      const capturedDisplayOrderWhite = ["q", "r", "b", "n", "p"];
+      const capturedDisplayOrderBlack = ["Q", "R", "B", "N", "P"];
+
+      function getPiecePath(pieceCode) {
+        return pieceImages[pieceCode] || "";
+      }
+
+      function squareName(row, col) {
+        const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
+
+        const rank = 8 - row;
+
+        return files[col] + rank;
+      }
+
+      function openGameSetup() {
+        const overlay = document.getElementById("gameSetupOverlay");
+        overlay.classList.remove("hidden");
+      }
+
+      function closeGameSetup() {
+        const overlay = document.getElementById("gameSetupOverlay");
+        overlay.classList.add("hidden");
+      }
+
+      function selectOption(button, groupSelector) {
+        const group = button.closest(groupSelector);
+        group.querySelectorAll(".setup-option").forEach((option) => {
+          option.classList.remove("selected");
+        });
+        button.classList.add("selected");
+      }
+
+      function setupGameSetupControls() {
+        const modeButtons = document.querySelectorAll("[data-mode]");
+        const timeButtons = document.querySelectorAll("[data-time]");
+        const difficultyButtons = document.querySelectorAll("[data-difficulty]");
+        const difficultySection = document.getElementById("difficultySection");
+        const startGameButton = document.getElementById("startGameButton");
+        const colorButtons = document.querySelectorAll("[data-color]");
+        const colorSection = document.getElementById("colorSection");
+
+        colorButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            selectOption(button, ".setup-options");
+            gameSettings.playerColor = button.dataset.color;
+          });
+        });
+
+        modeButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            selectOption(button, ".setup-options");
+            gameSettings.mode = button.dataset.mode;
+
+            if (gameSettings.mode === "engine") {
+              difficultySection.style.display = "";
+              colorSection.style.display = "";
+            } else {
+              difficultySection.style.display = "none";
+              colorSection.style.display = "none";
+            }
+          });
+        });
+
+        timeButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            selectOption(button, ".setup-options");
+            gameSettings.timeControl = button.dataset.time;
+          });
+        });
+
+        difficultyButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            selectOption(button, ".setup-options");
+            gameSettings.difficulty = button.dataset.difficulty;
+          });
+        });
+
+        startGameButton.addEventListener("click", async () => {
+          closeGameSetup();
+          await startNewGameWithSettings();
+        });
+      }
+
+      function resolvePlayerColor() {
+        if (gameSettings.playerColor === "random") {
+          return Math.random() < 0.5 ? "White" : "Black";
+        }
+        return gameSettings.playerColor === "black" ? "Black" : "White";
+      }
+
+      function setupGameSetupCancelControls() {
+        const overlay = document.getElementById("gameSetupOverlay");
+        const card = overlay.querySelector(".game-setup-card");
+        card.addEventListener("pointerdown", (event) => {
+          event.stopPropagation();
+        });
+        overlay.addEventListener("pointerdown", () => {
+          closeGameSetup();
+        });
+        document.addEventListener("keydown", (event) => {
+          if (event.key !== "Escape") return;
+          if (!overlay.classList.contains("hidden")) {
+            closeGameSetup();
+          }
+        });
+      }
+
+      function setupGameOverCancelControls() {
+        const overlay = document.getElementById("gameOverOverlay");
+        const card = overlay.querySelector(".game-over-card");
+        card.addEventListener("pointerdown", (event) => {
+          event.stopPropagation();
+        });
+        overlay.addEventListener("pointerdown", () => {
+          closeGameOverPopup();
+        });
+        document.addEventListener("keydown", (event) => {
+          if (event.key !== "Escape") return;
+          if (!overlay.classList.contains("hidden")) {
+            closeGameOverPopup();
+          }
+        });
+      }
+
+      function getDifficultyLabel() {
+        const difficulty = gameSettings.difficulty || "easy";
+        return difficulty.charAt(0).toUpperCase() + difficulty.slice(1);
+      }
+
+      function updateGameModeDisplay() {
+        const modeElement = document.getElementById("gameModeValue");
+        if (!modeElement) return;
+        if (gameSettings.mode === "engine") {
+          modeElement.textContent = `Engine: ${getDifficultyLabel()}`;
+        } else {
+          modeElement.textContent = "Over the Board";
+        }
+      }
+
+      function updateTurnDisplay(data) {
+        const turnElement = document.getElementById("turnValue");
+        if (!turnElement) return;
+        if (data.game_over) {
+          turnElement.textContent = "Game over";
+          updatePlayerCards(data);
+          return;
+        }
+        if (gameSettings.mode === "local") {
+          turnElement.textContent = `${data.turn} to move`;
+        } else {
+          turnElement.textContent =
+            data.turn === playerColor ? "Your turn" : "Engine thinking";
+        }
+        updatePlayerCards(data);
+      }
+
+      function hasTimer() {
+        return gameSettings.timeControl !== "none";
+      }
+
+      function formatClock(seconds) {
+        if (seconds === null || seconds === undefined) {
+          return "-- : --";
+        }
+
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = seconds % 60;
+        return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+      }
+
+      function updateClockDisplay() {
+        updatePlayerCards();
+      }
+
+      function stopClock() {
+        if (clockInterval) {
+          clearInterval(clockInterval);
+          clockInterval = null;
+        }
+      }
+
+      function startClockFor(turn) {
+        stopClock();
+
+        if (!hasTimer()) {
+          activeClock = null;
+          updateClockDisplay();
+          return;
+        }
+        activeClock = turn;
+        gameIsRunning = true;
+        updateClockDisplay();
+        clockInterval = setInterval(() => {
+          if (!gameIsRunning || !activeClock) return;
+          clocks[activeClock] -= 1;
+          if (clocks[activeClock] <= 0) {
+            clocks[activeClock] = 0;
+            updateClockDisplay();
+            handleTimeout(activeClock);
+            return;
+          }
+          updateClockDisplay();
+        }, 1000);
+      }
+
+      async function handleTimeout(sideThatFlagged) {
+        stopClock();
+        gameIsRunning = false;
+        clockStarted = false;
+        const winner = sideThatFlagged === "White" ? "Black" : "White";
+        const data = {
+          game_over: true,
+          winner: winner,
+          endReason: "timeout",
+          resultText: `${sideThatFlagged} lost on time`,
+        };
+        updateTurnDisplay(data);
+        await handleGameOver(data);
+      }
+
+      function resetClocks() {
+        if (!hasTimer()) {
+          clocks.White = null;
+          clocks.Black = null;
+        } else {
+          const startingSeconds = Number(gameSettings.timeControl);
+          clocks.White = startingSeconds;
+          clocks.Black = startingSeconds;
+        }
+        activeClock = null;
+        updateClockDisplay();
+      }
+
+      function startClockAfterMove(nextTurn) {
+        if (!hasTimer()) {
+          return;
+        }
+        if (!clockStarted) {
+          clockStarted = true;
+        }
+        startClockFor(nextTurn);
+      }
+
+      function updateMoveHistory(moveHistory) {
+        const historyElement = document.getElementById("moveHistory");
+        if (!historyElement) return;
+        historyElement.innerHTML = "";
+        if (!moveHistory || moveHistory.length === 0) {
+          historyElement.innerHTML = `
+            <div class="empty-history">
+              No moves yet
+            </div>
+          `;
+          return;
+        }
+        for (let i = 0; i < moveHistory.length; i += 2) {
+          const row = document.createElement("div");
+          row.className = "move-row";
+          if (i + 2 >= moveHistory.length) {
+            row.classList.add("latest-move-row");
+          }
+          const moveIndex = document.createElement("span");
+          moveIndex.className = "move-index";
+          moveIndex.textContent = `${Math.floor(i / 2) + 1}.`;
+          const whiteMove = document.createElement("span");
+          whiteMove.className = "move";
+          whiteMove.textContent = moveHistory[i] || "";
+          const blackMove = document.createElement("span");
+          blackMove.className = "move";
+          blackMove.textContent = moveHistory[i + 1] || "";
+          row.appendChild(moveIndex);
+          row.appendChild(whiteMove);
+          row.appendChild(blackMove);
+          historyElement.appendChild(row);
+        }
+        historyElement.scrollTop = historyElement.scrollHeight;
+      }
+
+      function getCurrentPieceCounts(boardPosition) {
+        const counts = {};
+        Object.keys(startingPieceCounts).forEach((piece) => {
+          counts[piece] = 0;
+        });
+        for (let row = 0; row < 8; row++) {
+          for (let col = 0; col < 8; col++) {
+            const piece = boardPosition[row][col];
+            if (piece) {
+              counts[piece] += 1;
+            }
+          }
+        }
+        return counts;
+      }
+
+      function getCapturedPiecesForColor(color, boardPosition) {
+        const currentCounts = getCurrentPieceCounts(boardPosition);
+        const capturedPieces = [];
+        const piecesToCheck =
+          color === "White"
+            ? capturedDisplayOrderWhite
+            : capturedDisplayOrderBlack;
+        piecesToCheck.forEach((piece) => {
+          const capturedCount = startingPieceCounts[piece] - currentCounts[piece];
+          for (let i = 0; i < capturedCount; i++) {
+            capturedPieces.push(piece);
+          }
+        });
+        return capturedPieces;
+      }
+
+      function getMaterialScore(color, boardPosition) {
+        const capturedPieces = getCapturedPiecesForColor(color, boardPosition);
+        return capturedPieces.reduce((total, piece) => {
+          return total + pieceValues[piece];
+        }, 0);
+      }
+
+      function getMaterialDifference(color, boardPosition) {
+        const whiteScore = getMaterialScore("White", boardPosition);
+        const blackScore = getMaterialScore("Black", boardPosition);
+        if (color === "White") {
+          return whiteScore - blackScore;
+        }
+        return blackScore - whiteScore;
+      }
+
+      function setDragTarget(square) {
+        if (currentDragTarget === square) return;
+        if (currentDragTarget) {
+          currentDragTarget.classList.remove("selected");
+        }
+        currentDragTarget = square;
+        if (currentDragTarget) {
+          currentDragTarget.classList.add("selected");
+        }
+      }
+
+      function renderCapturedBar(element, color) {
+        if (!element) return;
+        const capturedPieces = getCapturedPiecesForColor(color, position);
+        const materialDifference = getMaterialDifference(color, position);
+        element.innerHTML = "";
+        const left = document.createElement("div");
+        left.className = "captured-left";
+        const label = document.createElement("div");
+        label.className = "captured-label";
+        label.textContent = color;
+        const pieces = document.createElement("div");
+        pieces.className = "captured-pieces";
+        capturedPieces.forEach((piece) => {
+          const img = document.createElement("img");
+          img.className = "captured-piece-icon";
+          img.src = getPiecePath(piece);
+          img.alt = piece;
+          pieces.appendChild(img);
+        });
+        left.appendChild(label);
+        left.appendChild(pieces);
+        const diff = document.createElement("div");
+        diff.className = "material-difference";
+        if (materialDifference > 0) {
+          diff.textContent = `+${materialDifference}`;
+          diff.classList.add("positive");
+        } else if (materialDifference === 0) {
+          diff.textContent = "";
+          diff.classList.add("neutral");
+        } else {
+          diff.textContent = "";
+        }
+        left.appendChild(label);
+        left.appendChild(pieces);
+        left.appendChild(diff);
+        element.appendChild(left);
+      }
+
+      function updateCapturedDisplays() {
+        const topBar = document.getElementById("topCapturedBar");
+        const bottomBar = document.getElementById("bottomCapturedBar");
+        if (boardFlipped) {
+          renderCapturedBar(topBar, "White");
+          renderCapturedBar(bottomBar, "Black");
+        } else {
+          renderCapturedBar(topBar, "Black");
+          renderCapturedBar(bottomBar, "White");
+        }
+      }
+
+      function sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+      }
+
+      function getCastleRookMove(from, to) {
+        const castlingMoves = {
+          e1g1: { from: "h1", to: "f1" },
+          e1c1: { from: "a1", to: "d1" }, 
+          e8g8: { from: "h8", to: "f8" }, 
+          e8c8: { from: "a8", to: "d8" }, 
+        };
+
+        return castlingMoves[from + to] || null;
+      }
+
+      async function animateMoveWithCastling(from, to) {
+        const rookMove = getCastleRookMove(from, to);
+
+        if (rookMove) {
+          await Promise.all([
+            animateMove(from, to),
+            animateMove(rookMove.from, rookMove.to),
+          ]);
+        } else {
+          await animateMove(from, to);
+        }
+      }
+
+      function animateMove(from, to) {
+        return new Promise((resolve) => {
+          const fromSquare = document.querySelector(`[data-square="${from}"]`);
+          const toSquare = document.querySelector(`[data-square="${to}"]`);
+          if (!fromSquare || !toSquare) {
+            console.warn("Could not find animation squares:", { from, to });
+            resolve();
+            return;
+          }
+          const originalPiece = fromSquare.querySelector(".piece");
+          if (!originalPiece) {
+            console.warn("Could not find piece on source square:", from);
+            resolve();
+            return;
+          }
+          const capturedPiece = toSquare.querySelector(".piece");
+          const fromRect = originalPiece.getBoundingClientRect();
+          const toRect = toSquare.getBoundingClientRect();
+          const clone = originalPiece.cloneNode(true);
+          clone.className = "animated-piece";
+          clone.style.left = `${fromRect.left}px`;
+          clone.style.top = `${fromRect.top}px`;
+          clone.style.width = `${fromRect.width}px`;
+          clone.style.height = `${fromRect.height}px`;
+          clone.style.transition = "transform 0.25s ease";
+          clone.style.transform = "translate(0px, 0px)";
+          document.body.appendChild(clone);
+          originalPiece.style.visibility = "hidden";
+          const destinationLeft = toRect.left + (toRect.width - fromRect.width) / 2;
+          const destinationTop = toRect.top + (toRect.height - fromRect.height) / 2;
+          const deltaX = destinationLeft - fromRect.left;
+          const deltaY = destinationTop - fromRect.top;
+          let finished = false;
+          function finish() {
+            if (finished) return;
+            finished = true;
+            if (capturedPiece) {
+              capturedPiece.style.visibility = "hidden";
+            }
+            clone.remove();
+            originalPiece.style.visibility = "";
+            if (capturedPiece) {
+              capturedPiece.style.visibility = "";
+            }
+            resolve();
+          }
+          clone.getBoundingClientRect();
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              clone.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+            });
+          });
+          clone.addEventListener("transitionend", finish, { once: true });
+          setTimeout(finish, 400);
+        });
+      }
+      
+      function addPiece(square, pieceCode) {
+        if (!pieceCode) return;
+
+        const img = document.createElement("img");
+
+        img.src = getPiecePath(pieceCode);
+        img.alt = pieceCode;
+        img.className = "piece";
+        img.draggable = false;
+        img.loading = "eager";
+
+        img.addEventListener("pointerdown", (event) => {
+          event.preventDefault();
+
+          pendingDragPiece = img;
+          draggedPiece = null;
+          draggedFromSquare = square.dataset.square;
+
+          dragStartX = event.clientX;
+          dragStartY = event.clientY;
+
+          const rect = img.getBoundingClientRect();
+
+          dragOffsetX = event.clientX - rect.left;
+          dragOffsetY = event.clientY - rect.top;
+        });
+
+        square.appendChild(img);
+      }
+
+      document.addEventListener("pointermove", (event) => {
+        if (!pendingDragPiece && !draggedPiece) return;
+
+        const dx = event.clientX - dragStartX;
+        const dy = event.clientY - dragStartY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (!draggedPiece && distance < dragThreshold) {
+          return;
+        }
+
+        if (!draggedPiece) {
+          draggedPiece = pendingDragPiece;
+
+          const rect = draggedPiece.getBoundingClientRect();
+
+          draggedPiece.style.position = "fixed";
+          draggedPiece.style.left = `${rect.left}px`;
+          draggedPiece.style.top = `${rect.top}px`;
+          draggedPiece.style.width = `${rect.width}px`;
+          draggedPiece.style.height = `${rect.height}px`;
+          draggedPiece.style.margin = "0";
+          draggedPiece.style.inset = "auto";
+          draggedPiece.style.zIndex = "9999";
+          draggedPiece.style.pointerEvents = "none";
+
+          document.body.appendChild(draggedPiece);
+
+          const originSquareElement = document.querySelector(`[data-square="${draggedFromSquare}"]`);
+          if (originSquareElement) {
+            originSquareElement.classList.add("drag-origin");
+          }
+        }
+
+        draggedPiece.style.left = `${event.clientX - dragOffsetX}px`;
+        draggedPiece.style.top = `${event.clientY - dragOffsetY}px`;
+        draggedPiece.style.display = "none";
+        const elementUnderCursor = document.elementFromPoint(event.clientX, event.clientY);
+        draggedPiece.style.display = "";
+        const targetSquare = elementUnderCursor?.closest(".square");
+        setDragTarget(targetSquare);
+      });
+
+      document.addEventListener("pointerup", async (event) => {
+        if (!pendingDragPiece && !draggedPiece) return;
+        setDragTarget(null);
+        draggingFromSquare = null;
+        document.querySelectorAll(".drag-origin").forEach((square) => {
+          square.classList.remove("drag-origin");
+        });
+        const wasDragging = Boolean(draggedPiece);
+        const piece = draggedPiece;
+        const from = draggedFromSquare;
+        pendingDragPiece = null;
+        draggedPiece = null;
+        draggedFromSquare = null;
+        if (!wasDragging) {
+          return;
+        }
+        piece.style.display = "none";
+        const elementUnderCursor = document.elementFromPoint(event.clientX, event.clientY);
+        piece.remove();
+        const targetSquare = elementUnderCursor?.closest(".square");
+        if (!targetSquare) {
+          renderBoard();
+          return;
+        }
+        const to = targetSquare.dataset.square;
+        if (!from || !to || from === to) {
+          renderBoard();
+          return;
+        }
+        await makeMove(from, to, false);
+      });
+
+      function renderBoard() {
+        boardElement.innerHTML = "";
+        for (let displayRow = 0; displayRow < 8; displayRow++) {
+          for (let displayCol = 0; displayCol < 8; displayCol++) {
+            const row = boardFlipped ? 7 - displayRow : displayRow;
+            const col = boardFlipped ? 7 - displayCol : displayCol;
+            const square = document.createElement("div");
+            square.className = `square ${(row + col) % 2 === 0 ? "light" : "dark"}`;
+            square.dataset.square = squareName(row, col);
+            if (selectedSquare === square.dataset.square) {
+              square.classList.add("selected");
+            }
+            if (draggingFromSquare === square.dataset.square) {
+              square.classList.add("drag-origin");
+            }
+            if (lastMoveFrom === square.dataset.square || lastMoveTo === square.dataset.square) {
+              square.classList.add("last-move");
+            }
+            applyGameEndMarkerToSquare(square);
+            addPiece(square, position[row][col]);
+            square.addEventListener("click", () => handleSquareClick(square.dataset.square));
+            boardElement.appendChild(square);
+          }
+        }
+        updateCapturedDisplays();
+      }
+
+      function copyPosition(pos) {
+        return pos.map((row) => [...row]);
+      }
+
+      function isViewingLatestPosition() {
+        return historyIndex === positionHistory.length - 1;
+      }
+
+      async function setDisplayedHistoryPosition(index) {
+        if (positionHistory.length === 0) return;
+        const oldIndex = historyIndex;
+        const newIndex = Math.max(0, Math.min(index, positionHistory.length - 1));
+        if (oldIndex === newIndex) return;
+        const movingForward = newIndex > oldIndex;
+        const targetEntry = positionHistory[newIndex];
+        selectedSquare = null;
+        if (Math.abs(newIndex - oldIndex) === 1) {
+          if (movingForward) {
+            const move = positionHistory[newIndex].lastMove;
+            if (move) {
+              await animateMoveWithCastling(move.from, move.to);
+            }
+          } else {
+            const move = positionHistory[oldIndex].lastMove;
+            if (move) {
+              await animateMoveWithCastling(move.to, move.from);
+            }
+          }
+        }
+        historyIndex = newIndex;
+        position = copyPosition(targetEntry.position);
+        if (movingForward) {
+          lastMoveFrom = targetEntry.lastMove?.from || null;
+          lastMoveTo = targetEntry.lastMove?.to || null;
+        } else {
+          const previousMove = positionHistory[newIndex].lastMove;
+          lastMoveFrom = previousMove?.from || null;
+          lastMoveTo = previousMove?.to || null;
+        }
+        renderBoard();
+        updateHistoryButtons();
+      }
+
+      function goToLatestPosition() {
+        if (positionHistory.length === 0) return;
+        historyIndex = positionHistory.length - 1;
+        const latestEntry = positionHistory[positionHistory.length - 1];
+        position = copyPosition(latestEntry.position);
+        selectedSquare = null;
+        renderBoard();
+        updateHistoryButtons();
+      }
+
+      function saveLatestPosition(newPosition, lastMove = null) {
+        currentPosition = copyPosition(newPosition);
+        positionHistory.push(makeHistoryEntry(newPosition, lastMove));
+        historyIndex = positionHistory.length - 1;
+        position = copyPosition(newPosition);
+        updateHistoryButtons();
+      }
+
+      function updateHistoryButtons() {
+        const firstButton = document.getElementById("firstMoveButton");
+        const previousButton = document.getElementById("previousMoveButton");
+        const nextButton = document.getElementById("nextMoveButton");
+        const latestButton = document.getElementById("latestMoveButton");
+        const hasHistory = positionHistory.length > 0;
+        const atStart = historyIndex <= 0;
+        const atLatest = historyIndex >= positionHistory.length - 1;
+        if (firstButton) firstButton.disabled = !hasHistory || atStart;
+        if (previousButton) previousButton.disabled = !hasHistory || atStart;
+        if (nextButton) nextButton.disabled = !hasHistory || atLatest;
+        if (latestButton) latestButton.disabled = !hasHistory || atLatest;
+      }
+
+      function makeHistoryEntry(boardPosition, lastMove = null) {
+        return {
+          position: copyPosition(boardPosition),
+          lastMove: lastMove,
+        };
+      }
+
+      function highlightIllegalMove(squareName) {
+        const square = document.querySelector(`[data-square="${squareName}"]`);
+        if (!square) {
+          return;
+        }
+        square.classList.add("illegal-move");
+        setTimeout(() => {
+          square.classList.remove("illegal-move");
+        }, 700);
+      }
+
+      async function loadPosition() {
+        gameEndMarkers = null;
+        const response = await fetch("/position");
+        const data = await response.json();
+        currentPosition = copyPosition(data.position);
+        positionHistory = [makeHistoryEntry(data.position, null)];
+        historyIndex = 0;
+        position = copyPosition(positionHistory[0].position);
+        renderBoard();
+        updateHistoryButtons();
+        updateTurnDisplay(data);
+        updateGameModeDisplay();
+        updateMoveHistory(data.moveHistory);
+      }
+
+      function isPromotionMove(from, to) {
+        const piece = pieceAt(from);
+        if (!piece) return false;
+        const isPawn = piece.toLowerCase() === "p";
+        if (!isPawn) return false;
+        const targetRank = to[1];
+        return (
+          (piece === "P" && targetRank === "8") ||
+          (piece === "p" && targetRank === "1")
+        );
+      }
+      
+      function askPromotionPiece(piece) {
+        const choice = prompt("Promote to: q, r, b, or n", "q");
+        if (!choice) return "q";
+        const normalized = choice.toLowerCase();
+        if (["q", "r", "b", "n"].includes(normalized)) {
+          return normalized;
+        }
+        return "q";
+      }
+
+      function pieceAt(squareName) {
+        const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
+        const col = files.indexOf(squareName[0]);
+        const row = 8 - Number(squareName[1]);
+        return position[row][col];
+      }
+
+      function isWhitePiece(piece) {
+        return piece === piece.toUpperCase();
+      }
+
+      function isBlackPiece(piece) {
+        return piece === piece.toLowerCase();
+      }
+
+      function isSameColor(piece1, piece2) {
+        if (!piece1 || !piece2) return false;
+        return (
+          (isWhitePiece(piece1) && isWhitePiece(piece2)) ||
+          (isBlackPiece(piece1) && isBlackPiece(piece2))
+        );
+      }
+
+      function getPromotionPieceCode(pawnPiece, promotion) {
+        const isWhite = pawnPiece === "P";
+        if (isWhite) {
+          return promotion.toUpperCase();
+        }
+        return promotion.toLowerCase();
+      }
+
+      function choosePromotion(pawnPiece, targetSquareName) {
+        return new Promise((resolve) => {
+          const overlay = document.getElementById("promotionOverlay");
+          const card = document.getElementById("promotionCard");
+          const options = card.querySelectorAll(".promotion-piece");
+          const targetSquare = document.querySelector(
+            `[data-square="${targetSquareName}"]`
+          );
+          if (!overlay || !card || !targetSquare) {
+            resolve(null);
+            return;
+          }
+          const targetRect = targetSquare.getBoundingClientRect();
+          const squareSize = targetRect.width;
+          card.style.setProperty("--promotion-square-size", `${squareSize}px`);
+          card.style.left = `${targetRect.left}px`;
+          const promoteUp = pawnPiece === "p";
+          card.classList.toggle("promote-up", promoteUp);
+          if (promoteUp) {
+            card.style.top = `${targetRect.bottom - squareSize * 4}px`;
+          } else {
+            card.style.top = `${targetRect.top}px`;
+          }
+          function closePromotion(result) {
+            overlay.classList.add("hidden");
+            overlay.removeEventListener("pointerdown", handleOverlayClick);
+            options.forEach((option) => {
+              option.onclick = null;
+            });
+            resolve(result);
+          }
+          function handleOverlayClick(event) {
+            if (!card.contains(event.target)) {
+              closePromotion(null);
+            }
+          }
+          options.forEach((option) => {
+            const promotion = option.dataset.promotion;
+            const pieceCode = getPromotionPieceCode(pawnPiece, promotion);
+            option.innerHTML = "";
+            const img = document.createElement("img");
+            img.src = getPiecePath(pieceCode);
+            img.alt = pieceCode;
+            option.appendChild(img);
+            option.onclick = () => {
+              closePromotion(promotion);
+            };
+          });
+          overlay.classList.remove("hidden");
+          setTimeout(() => {
+            overlay.addEventListener("pointerdown", handleOverlayClick);
+          }, 0);
+        });
+      }
+
+      function findKingSquare(color) {
+        const kingCode = color === "White" ? "K" : "k";
+        for (let row = 0; row < 8; row++) {
+          for (let col = 0; col < 8; col++) {
+            if (position[row][col] === kingCode) {
+              return squareName(row, col);
+            }
+          }
+        }
+        return null;
+      }
+
+      function setGameEndMarkers(data) {
+        const whiteKingSquare = findKingSquare("White");
+        const blackKingSquare = findKingSquare("Black");
+        gameEndMarkers = {
+          whiteKingSquare,
+          blackKingSquare,
+          winnerSquare: null,
+          loserSquare: null,
+          reason: data.endReason || "game over",
+          isDraw: !data.winner,
+        };
+        if (data.winner === "White") {
+          gameEndMarkers.winnerSquare = whiteKingSquare;
+          gameEndMarkers.loserSquare = blackKingSquare;
+        } else if (data.winner === "Black") {
+          gameEndMarkers.winnerSquare = blackKingSquare;
+          gameEndMarkers.loserSquare = whiteKingSquare;
+        }
+      }
+
+      function applyGameEndMarkerToSquare(square) {
+        if (!gameEndMarkers) return;
+        if (!isViewingLatestPosition()) return;
+        const squareName = square.dataset.square;
+        if (gameEndMarkers.isDraw) {
+          if (
+            squareName === gameEndMarkers.whiteKingSquare ||
+            squareName === gameEndMarkers.blackKingSquare
+          ) {
+            square.classList.add("king-draw-square");
+            addKingResultLabel(square, "Draw", "draw");
+          }
+          return;
+        }
+        if (squareName === gameEndMarkers.winnerSquare) {
+          square.classList.add("king-winner-square");
+          addKingResultLabel(square, "Winner", "winner");
+        }
+        if (squareName === gameEndMarkers.loserSquare) {
+          square.classList.add("king-loser-square");
+          const labelText =
+            gameEndMarkers.reason === "checkmate"
+              ? "Checkmate"
+              : gameEndMarkers.reason === "timeout"
+                ? "Timeout"
+                : "Lost";
+          addKingResultLabel(square, labelText, "loser");
+        }
+      }
+
+      function addKingResultLabel(square, text, type) {
+        const label = document.createElement("div");
+        label.className = `king-result-label ${type}`;
+        label.textContent = text;
+        square.appendChild(label);
+      }
+
+      function showTemporaryPieceOnSquare(pieceCode, squareName) {
+        const square = document.querySelector(`[data-square="${squareName}"]`);
+        if (!square) return null;
+        const img = document.createElement("img");
+        img.src = getPiecePath(pieceCode);
+        img.alt = pieceCode;
+        img.className = "piece";
+        img.draggable = false;
+        img.style.pointerEvents = "none";
+        square.appendChild(img);
+        return img;
+      }
+
+      async function makeMove(from, to, shouldAnimate = false) {
+        if (!isViewingLatestPosition()) {
+          goToLatestPosition();
+          return;
+        }
+        if (hasTimer() && !gameIsRunning) {
+          renderBoard();
+          return;
+        }
+        let promotion = "";
+        const movingPiece = pieceAt(from);
+        if (isPromotionMove(from, to)) {
+          promotion = await choosePromotion(movingPiece, to);
+        }
+        if (promotion === null) {
+          selectedSquare = null;
+          renderBoard();
+          return;
+        }
+        if (gameSettings.mode === "engine") {
+          const movingColor = isWhitePiece(movingPiece) ? "White" : "Black";
+          if (movingColor !== playerColor) {
+            renderBoard();
+            return;
+          }
+        }
+        const move = {
+          from: from,
+          to: to,
+          promotion: promotion,
+        };
+        selectedSquare = null;
+        const response = await fetch("/move", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(move),
+        });
+        const data = await response.json();
+        if (data.success === false) {
+          renderBoard();
+          highlightIllegalMove(data.highlight || move.from);
+          return;
+        }
+        if (!data.position) {
+          console.error("Move response did not include a position:", data);
+          renderBoard();
+          return;
+        }
+        const rookMove = getCastleRookMove(from, to);
+        if (shouldAnimate) {
+          await animateMoveWithCastling(from, to);
+        } else if (rookMove) {
+          const kingCode = from[1] === "1" ? "K" : "k";
+          const temporaryKing = showTemporaryPieceOnSquare(kingCode, to);
+          await animateMove(rookMove.from, rookMove.to);
+          if (temporaryKing) {
+            temporaryKing.remove();
+          }
+        }
+        if (data.lastMove) {
+          lastMoveFrom = data.lastMove.from;
+          lastMoveTo = data.lastMove.to;
+        } else {
+          lastMoveFrom = from;
+          lastMoveTo = to;
+        }
+        saveLatestPosition(data.position, data.lastMove || { from, to });
+        if (gameSettings.mode === "local") {
+          boardFlipped = !boardFlipped;
+        }
+        renderBoard();
+        updateTurnDisplay(data);
+        updateGameModeDisplay();
+        updateMoveHistory(data.moveHistory);
+        if (data.game_over) {
+          stopClock();
+          gameIsRunning = false;
+          await handleGameOver(data);
+          return;
+        }
+        startClockAfterMove(data.turn);
+        if (gameSettings.mode === "engine") {
+          await sleep(1500);
+          await makeEngineMove();
+        }
+      }
+
+      async function makeEngineMove() {
+        const response = await fetch("/engine-move", {
+          method: "POST",
+        });
+        const data = await response.json();
+        if (data.success === false) {
+          console.error("Engine move failed:", data.error);
+          return;
+        }
+        if (!data.position) {
+          console.error("Engine response did not include a position:", data);
+          renderBoard();
+          return;
+        }
+
+        if (data.lastMove) {
+          await animateMoveWithCastling(data.lastMove.from, data.lastMove.to);
+          lastMoveFrom = data.lastMove.from;
+          lastMoveTo = data.lastMove.to;
+        }
+        saveLatestPosition(data.position, data.lastMove || null);
+        renderBoard();
+        updateTurnDisplay(data);
+        updateGameModeDisplay();
+        updateMoveHistory(data.moveHistory);
+        if (data.game_over) {
+          stopClock();
+          gameIsRunning = false;
+          await handleGameOver(data);
+          return;
+        }
+        startClockAfterMove(data.turn);
+        if (data.game_over) {
+          handleGameOver(data);
+        }
+      }
+
+      async function handleSquareClick(square) {
+        if (!isViewingLatestPosition()) {
+          goToLatestPosition();
+          return;
+        }
+        if (selectedSquare === null) {
+          const piece = pieceAt(square);
+          if (!piece) {
+            return;
+          }
+          selectedSquare = square;
+          renderBoard();
+          return;
+        }
+        if (square === selectedSquare) {
+          selectedSquare = null;
+          renderBoard();
+          return;
+        }
+        const selectedPiece = pieceAt(selectedSquare);
+        const clickedPiece = pieceAt(square);
+        if (clickedPiece && isSameColor(selectedPiece, clickedPiece)) {
+          selectedSquare = square;
+          renderBoard();
+          return;
+        }
+        await makeMove(selectedSquare, square, true);
+      }
+    
+      function oppositeColor(color) {
+        return color === "White" ? "Black" : "White";
+      }
+      function getClockForColor(color) {
+        return color === "White" ? clocks.White : clocks.Black;
+      }
+      function setPlayerCard(prefix, label, color) {
+        document.getElementById(`${prefix}PlayerLabel`).textContent = label;
+        document.getElementById(`${prefix}PlayerName`).textContent = color;
+        const timer = document.getElementById(`${prefix}PlayerTimer`);
+        timer.textContent = formatClock(getClockForColor(color));
+        timer.classList.toggle("active-timer", activeClock === color);
+        timer.classList.toggle(
+          "low-time",
+          getClockForColor(color) !== null && getClockForColor(color) <= 10
+        );
+      }
+
+      function updatePlayerCards(data = null) {
+        if (gameSettings.mode === "engine") {
+          const engineColor = oppositeColor(playerColor);
+          setPlayerCard("top", `Engine: ${getDifficultyLabel()}`, engineColor);
+          setPlayerCard("bottom", "You", playerColor);
+          return;
+        }
+        const bottomColor = boardFlipped ? "Black" : "White";
+        const topColor = oppositeColor(bottomColor);
+        setPlayerCard("top", "Opponent", topColor);
+        setPlayerCard("bottom", "You", bottomColor);
+      }
+
+      async function startNewGameWithSettings() {
+        stopClock();
+        gameIsRunning = false;
+        activeClock = null;
+        selectedSquare = null;
+        lastMoveFrom = null;
+        lastMoveTo = null;
+        playerColor = resolvePlayerColor();
+        if (gameSettings.mode === "engine") {
+          boardFlipped = playerColor === "Black";
+        } else {
+          boardFlipped = false;
+        }
+        gameEndMarkers = null;
+        const response = await fetch("/new-game", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ...gameSettings,
+            resolvedPlayerColor: playerColor,
+          }),
+        });
+        const data = await response.json();
+        if (data.success === false) {
+          return;
+        }
+      currentPosition = copyPosition(data.position);
+      positionHistory = [makeHistoryEntry(data.position, null)];
+      historyIndex = 0;
+      position = copyPosition(positionHistory[0].position);
+      renderBoard();
+      updateHistoryButtons();
+        updateMoveHistory(data.moveHistory);
+        gameIsRunning = true;
+        resetClocks();
+        updateTurnDisplay(data);
+        updateGameModeDisplay();
+        clockStarted = false;
+        activeClock = null;
+        updateClockDisplay();
+        if (gameSettings.mode === "engine" && playerColor === "Black") {
+          await sleep(500);
+          await makeEngineMove();
+        }
+      }
+
+      function closeGameOverPopup() {
+        const overlay = document.getElementById("gameOverOverlay");
+        overlay.classList.add("hidden");
+      }
+      function getGameOverReason(data) {
+        if (data.endReason) {
+          return data.endReason;
+        }
+        if (data.resultText) {
+          const lower = data.resultText.toLowerCase();
+          if (lower.includes("checkmate")) return "checkmate";
+          if (lower.includes("stalemate")) return "stalemate";
+          if (lower.includes("insufficient material")) return "insufficient material";
+          if (lower.includes("75-move")) return "75-move rule";
+          if (lower.includes("fivefold")) return "fivefold repetition";
+        }
+        return "game over";
+      }
+
+      function getGameOverTitle(data) {
+        const reason = getGameOverReason(data);
+        if (gameSettings.mode === "engine") {
+          const difficultyLabel = getDifficultyLabel();
+          if (data.winner === playerColor) {
+            return `You beat\n${difficultyLabel} chess engine!`;
+          }
+          if (data.winner && data.winner !== playerColor) {
+            return `${difficultyLabel} chess engine\nbeat you!`;
+          }
+          return `You drew with\n${difficultyLabel} chess engine!`;
+        }
+        if (data.winner === "White") {
+          return "White wins!";
+        }
+        if (data.winner === "Black") {
+          return "Black wins!";
+        }
+        return "Draw!";
+      }
+
+      function openGameOverPopup(data) {
+        const overlay = document.getElementById("gameOverOverlay");
+        const title = document.getElementById("gameOverTitle");
+        const reason = document.getElementById("gameOverReason");
+        title.textContent = getGameOverTitle(data);
+        reason.textContent = `by ${getGameOverReason(data)}`;
+        overlay.classList.remove("hidden");
+      }
+
+      async function handleGameOver(data) {
+        updateTurnDisplay(data);
+        setGameEndMarkers(data);
+        renderBoard();
+        await sleep(900);
+        openGameOverPopup(data);
+      }
+
+      function setupGameOverControls() {
+        const rematchButton = document.getElementById("rematchButton");
+        const newGameButton = document.getElementById("gameOverNewGameButton");
+
+        rematchButton.addEventListener("click", async () => {
+          closeGameOverPopup();
+          await startNewGameWithSettings();
+        });
+
+        newGameButton.addEventListener("click", () => {
+          closeGameOverPopup();
+          openGameSetup();
+        });
+      }
+
+      function setupHistoryControls() {
+        document.getElementById("firstMoveButton").addEventListener("click", async () => {
+          await setDisplayedHistoryPosition(0);
+        });
+        document.getElementById("previousMoveButton").addEventListener("click", async () => {
+          await setDisplayedHistoryPosition(historyIndex - 1);
+        });
+        document.getElementById("nextMoveButton").addEventListener("click", async () => {
+          await setDisplayedHistoryPosition(historyIndex + 1);
+        });
+        document.getElementById("latestMoveButton").addEventListener("click", async () => {
+          await goToLatestPosition();
+        });
+      }
+
+      function setupKeyboardHistoryControls() {
+        document.addEventListener("keydown", async (event) => {
+          if (historyAnimationInProgress) return;
+          const setupOverlay = document.getElementById("gameSetupOverlay");
+          const gameOverOverlay = document.getElementById("gameOverOverlay");
+          const promotionOverlay = document.getElementById("promotionOverlay");
+          const popupOpen =
+            !setupOverlay.classList.contains("hidden") ||
+            !gameOverOverlay.classList.contains("hidden") ||
+            !promotionOverlay.classList.contains("hidden");
+          if (popupOpen) return;
+          if (
+            !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
+          ) {
+            return;
+          }
+          event.preventDefault();
+          historyAnimationInProgress = true;
+          if (event.key === "ArrowLeft") {
+            await setDisplayedHistoryPosition(historyIndex - 1);
+          }
+          if (event.key === "ArrowRight") {
+            await setDisplayedHistoryPosition(historyIndex + 1);
+          }
+          if (event.key === "Home") {
+            await setDisplayedHistoryPosition(0);
+          }
+          if (event.key === "End") {
+            goToLatestPosition();
+          }
+          historyAnimationInProgress = false;
+        });
+      }
+
+      setupGameSetupControls();
+      setupGameSetupCancelControls();
+      setupGameOverControls();
+      setupGameOverCancelControls();
+      setupHistoryControls();
+      setupKeyboardHistoryControls();
+      document.getElementById("newGameButton").addEventListener("click", openGameSetup);
+      document.getElementById("flipBoardButton").addEventListener("click", () => {
+        boardFlipped = !boardFlipped;
+        selectedSquare = null;
+        renderBoard();
+        updatePlayerCards();
+      });
+      loadPosition();
+
+    </script>
+  </body>
+</html>
